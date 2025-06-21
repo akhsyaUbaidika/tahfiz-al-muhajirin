@@ -66,7 +66,7 @@ def ambil_data_dari_firestore(pekan, bulan, tahun):
 def hapus_data_dari_firestore(nama):
     db.collection("hafalan_santri").document(nama).delete()
 
-st.title("📘 Analisis Hafalan Santri - Versi Lengkap")
+st.title("📘 Analisis Hafalan Santri - Input Data")
 
 page = st.sidebar.selectbox("Pilih Halaman", ["Input Data", "Hasil Analisa"])
 
