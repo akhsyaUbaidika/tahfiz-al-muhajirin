@@ -184,7 +184,7 @@ elif page == "Hasil Analisa":
             **💡 Kesimpulan Sementara:**  
             Sebagian besar santri menunjukkan hasil yang cukup baik hingga sangat baik, namun tetap terdapat sebagian yang memerlukan bimbingan lebih intensif untuk mencapai hasil maksimal.
             """)
-
+# Revisi 30 Juni
         else:
             st.warning("❗ Tambahkan minimal 2 data untuk analisa.")
 
