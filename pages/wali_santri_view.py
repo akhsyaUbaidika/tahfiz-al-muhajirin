@@ -96,7 +96,7 @@ if menu == "Periode Bulanan":
             ]])
 
             st.plotly_chart(px.pie(df, names='Kategori', title='Distribusi Santri Berdasarkan Kategori'))
-
+            
             fig, ax = plt.subplots()
             sns.scatterplot(
                 data=df,
@@ -109,6 +109,21 @@ if menu == "Periode Bulanan":
             ax.set_xlabel("Jumlah Hafalan")
             ax.set_ylabel("Kelancaran Hafalan")
             st.pyplot(fig)
+
+            # Hitung jumlah per kategori
+            jumlah_per_kategori = df['Kategori'].value_counts().to_dict()
+
+            # Tampilkan keterangan informatif
+            st.markdown(f"""
+            **📊 Ringkasan Klasterisasi Santri:**
+
+            - **{jumlah_per_kategori.get('Cepat & Konsisten', 0)} santri** berada dalam kategori **Cepat & Konsisten**: menunjukkan hafalan tinggi, kehadiran baik, dan kelancaran stabil.
+            - **{jumlah_per_kategori.get('Cukup Baik', 0)} santri** berada dalam kategori **Cukup Baik**: memiliki capaian yang cukup namun masih bisa ditingkatkan.
+            - **{jumlah_per_kategori.get('Perlu Pendampingan', 0)} santri** berada dalam kategori **Perlu Pendampingan**: menunjukkan tantangan dalam hafalan, kehadiran, atau kelancaran yang perlu dibina lebih lanjut.
+
+            **💡 Kesimpulan Sementara:**  
+            Sebagian besar santri menunjukkan hasil yang cukup baik hingga sangat baik, namun tetap terdapat sebagian yang memerlukan bimbingan lebih intensif untuk mencapai hasil maksimal.
+            """)
         else:
             st.warning("❗ Minimal 2 data diperlukan untuk evaluasi.")
 

@@ -163,9 +163,28 @@ elif page == "Hasil Analisa":
 
             st.dataframe(df[['nama', 'jumlah_hafalan', 'kehadiran', 'kelancaran_total', 'Kategori']])
             st.plotly_chart(px.pie(df, names='Kategori', title='Distribusi Klaster'))
+            
             fig, ax = plt.subplots()
             sns.scatterplot(data=df, x='jumlah_hafalan_berbobot', y='kelancaran_total', hue='Kategori', palette='Set2', s=100)
             st.pyplot(fig)
+
+            # Hitung jumlah per kategori
+            jumlah_per_kategori = df['Kategori'].value_counts().to_dict()
+
+            # Tampilkan keterangan informatif
+            st.markdown(f"""
+            **📊 Ringkasan Klasterisasi Santri:**
+
+            - **{jumlah_per_kategori.get('Cepat & Konsisten', 0)} santri** berada dalam kategori **Cepat & Konsisten**: menunjukkan hafalan tinggi, kehadiran baik, dan kelancaran stabil.
+            - **{jumlah_per_kategori.get('Cukup Baik', 0)} santri** berada dalam kategori **Cukup Baik**: memiliki capaian yang cukup namun masih bisa ditingkatkan.
+            - **{jumlah_per_kategori.get('Perlu Pendampingan', 0)} santri** berada dalam kategori **Perlu Pendampingan**: menunjukkan tantangan dalam hafalan, kehadiran, atau kelancaran yang perlu dibina lebih lanjut.
+
+            📌 _Grafik ini membantu pengelola melihat distribusi santri berdasarkan performa mereka secara objektif menggunakan algoritma K-Means._
+
+            **💡 Kesimpulan Sementara:**  
+            Sebagian besar santri menunjukkan hasil yang cukup baik hingga sangat baik, namun tetap terdapat sebagian yang memerlukan bimbingan lebih intensif untuk mencapai hasil maksimal.
+            """)
+
         else:
             st.warning("❗ Tambahkan minimal 2 data untuk analisa.")
 
