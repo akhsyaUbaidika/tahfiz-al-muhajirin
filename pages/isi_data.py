@@ -147,12 +147,12 @@ elif page == "Hasil Analisa":
     if st.button("Lihat Klustering"):
         df = pd.DataFrame(ambil_data_dari_firestore(bulan, tahun))
         if len(df) >= 2:
-            df['jumlah_hafalan_berbobot'] = df['jumlah_hafalan']
-            features = df[['jumlah_hafalan_berbobot', 'kelancaran_total', 'kehadiran']]
+            df['jumlah_hafalan_ayat_berbobot'] = df['jumlah_hafalan']
+            features = df[['jumlah_hafalan_ayat_berbobot', 'kelancaran_total', 'kehadiran']]
             features_scaled = StandardScaler().fit_transform(features)
             df['Klaster'] = KMeans(n_clusters=3, random_state=42, n_init='auto').fit_predict(features_scaled)
 
-            order = df.groupby('Klaster')['jumlah_hafalan_berbobot'].mean().sort_values(ascending=False).index
+            order = df.groupby('Klaster')['jumlah_hafalan_ayat_berbobot'].mean().sort_values(ascending=False).index
             mapping = {
                 order[0]: 'Cepat & Konsisten',
                 order[1]: 'Cukup Baik',
@@ -161,11 +161,13 @@ elif page == "Hasil Analisa":
             df['Kategori'] = df['Klaster'].map(mapping)
             df['juz'] = df['juz'].apply(lambda x: ', '.join(map(str, x)) if isinstance(x, list) else str(x))
 
-            st.dataframe(df[['nama', 'jumlah_hafalan', 'kehadiran', 'kelancaran_total', 'Kategori']])
+            df_rename = df.rename(columns={"jumlah_hafalan": "jumlah_hafalan_ayat"})
+            st.dataframe(df_rename[['nama', 'jumlah_hafalan_ayat', 'kehadiran', 'kelancaran_total', 'Kategori']])
+
             st.plotly_chart(px.pie(df, names='Kategori', title='Distribusi Klaster'))
             
             fig, ax = plt.subplots()
-            sns.scatterplot(data=df, x='jumlah_hafalan_berbobot', y='kelancaran_total', hue='Kategori', palette='Set2', s=100)
+            sns.scatterplot(data=df, x='jumlah_hafalan_ayat_berbobot', y='kelancaran_total', hue='Kategori', palette='Set2', s=100)
             st.pyplot(fig)
 
             # Hitung jumlah per kategori
@@ -196,6 +198,7 @@ elif page == "Riwayat Santri":
         hasil = ambil_data_dari_nama(nama)
         if hasil:
             df = pd.DataFrame(hasil)
+            df.rename(columns={"jumlah_hafalan": "jumlah_hafalan_ayat"}, inplace=True)
             df['juz'] = df['juz'].apply(lambda x: ', '.join(map(str, x)) if isinstance(x, list) else x)
             st.dataframe(df.sort_values(by=["tahun", "bulan"], ascending=False))
         else:
