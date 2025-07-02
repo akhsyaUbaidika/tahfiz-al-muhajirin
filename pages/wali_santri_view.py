@@ -89,11 +89,19 @@ if menu == "Periode Bulanan":
             df['Kategori'] = df['Klaster'].map(mapping)
 
             st.success("✅ Data berhasil ditampilkan.")
-            st.dataframe(df[[
-                'nama', 'juz', 'juz_sedang',
-                'ayat_disetor', 'ayat_sedang_disetor',
-                'kehadiran', 'Kategori'
+
+            df.rename(columns={"juz": "juz_dihafal"}, inplace=True)
+            df.rename(columns={"juz_sedang": "juz_sedang_dihafal"}, inplace=True)
+            df.rename(columns={"jumlah_hafalan": "jumlah_hafalan_ayat"}, inplace=True)
+
+
+            st.dataframe(df[[  
+                'nama', 'juz_dihafal', 'juz_sedang_dihafal',  
+                'jumlah_hafalan_ayat_berbobot',  
+                'ayat_disetor', 'ayat_sedang_disetor',  
+                'kehadiran', 'Kategori'  
             ]])
+
 
             st.plotly_chart(px.pie(df, names='Kategori', title='Distribusi Santri Berdasarkan Kategori'))
             
@@ -106,7 +114,7 @@ if menu == "Periode Bulanan":
                 palette='Set2',
                 s=100
             )
-            ax.set_xlabel("Jumlah Hafalan")
+            ax.set_xlabel("Jumlah Hafalan(Ayat Berbobot)")
             ax.set_ylabel("Kelancaran Hafalan")
             st.pyplot(fig)
 
