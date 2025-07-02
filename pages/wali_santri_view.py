@@ -90,9 +90,11 @@ if menu == "Periode Bulanan":
 
             st.success("✅ Data berhasil ditampilkan.")
 
-            df.rename(columns={"juz": "juz_dihafal"}, inplace=True)
-            df.rename(columns={"juz_sedang": "juz_sedang_dihafal"}, inplace=True)
-            df.rename(columns={"jumlah_hafalan": "jumlah_hafalan_ayat"}, inplace=True)
+            df.rename(columns={
+                "juz": "juz_dihafal",
+                "juz_sedang": "juz_sedang_dihafal",
+                "jumlah_hafalan_berbobot": "jumlah_hafalan_ayat_berbobot"
+            }, inplace=True)
 
 
             st.dataframe(df[[  
@@ -108,7 +110,7 @@ if menu == "Periode Bulanan":
             fig, ax = plt.subplots()
             sns.scatterplot(
                 data=df,
-                x='jumlah_hafalan_berbobot',
+                x='jumlah_hafalan_ayat_berbobot',
                 y='kelancaran_total',
                 hue='Kategori',
                 palette='Set2',
