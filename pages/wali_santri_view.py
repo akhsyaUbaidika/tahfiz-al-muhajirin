@@ -41,11 +41,11 @@ db = firestore.client()
 
 # Fungsi bantu
 def ambil_data_dari_firestore(bulan, tahun):
-    return [doc.to_dict() for doc in db.collection("hafalan_santri_al_muhajirin")
+    return [doc.to_dict() for doc in db.collection("hafalan_santri_al_muhajirin_mei_sep_2025")
             .where("bulan", "==", bulan).where("tahun", "==", tahun).stream()]
 
 def ambil_data_dari_nama(nama):
-    return [doc.to_dict() for doc in db.collection("hafalan_santri_al_muhajirin")
+    return [doc.to_dict() for doc in db.collection("hafalan_santri_al_muhajirin_mei_sep_2025")
             .where("nama", "==", nama).stream()]
 
 def ambil_daftar_santri():
