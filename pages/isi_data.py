@@ -55,18 +55,18 @@ def ambil_daftar_santri():
 
 def simpan_data_ke_firestore(data):
     doc_id = f"{data['nama']}_{data['bulan']}_{data['tahun']}"
-    db.collection("hafalan_santri_al_muhajirin").document(doc_id).set(data)
+    db.collection("hafalan_santri_al_muhajirin_mei_sep_2025").document(doc_id).set(data)
 
 def hapus_data_dari_firestore(doc_id):
-    db.collection("hafalan_santri_al_muhajirin").document(doc_id).delete()
+    db.collection("hafalan_santri_al_muhajirin_mei_sep_2025").document(doc_id).delete()
 
 def ambil_data_dari_firestore(bulan, tahun):
-    return [doc.to_dict() for doc in db.collection("hafalan_santri_al_muhajirin")
+    return [doc.to_dict() for doc in db.collection("hafalan_santri_al_muhajirin_mei_sep_2025")
             .where(filter=FieldFilter("bulan", "==", bulan))
             .where(filter=FieldFilter("tahun", "==", tahun)).stream()]
 
 def ambil_data_dari_nama(nama):
-    return [doc.to_dict() for doc in db.collection("hafalan_santri_al_muhajirin")
+    return [doc.to_dict() for doc in db.collection("hafalan_santri_al_muhajirin_mei_sep_2025")
             .where(filter=FieldFilter("nama", "==", nama)).stream()]
 
 # UI
