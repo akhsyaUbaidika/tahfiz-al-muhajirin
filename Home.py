@@ -51,9 +51,115 @@ juz_bobot = {
     26: ("Sedang", 195), 27: ("Sulit", 399), 28: ("Sedang", 137), 29: ("Sulit", 431), 30: ("Mudah", 564)
 }
 
+# ---------- Fungsi bantu pembobotan & ambil data harian ----------
+
+def faktor_juz(juz: int) -> float:
+    """Mengembalikan faktor kesulitan berdasarkan juz."""
+    if pd.isna(juz):
+        return 1.0
+    try:
+        j = int(juz)
+    except Exception:
+        return 1.0
+    info = juz_bobot.get(j)
+    if not info:
+        return 1.0
+    tingkat, _ = info
+    if tingkat == "Sulit":
+        return 2.0
+    elif tingkat == "Sedang":
+        return 1.5
+    return 1.0  # Mudah atau default
+
+
+def hitung_bobot_hafalan(row) -> float:
+    """
+    bobot_ayat_dihafal =
+        Σ (jumlah_ayat_juz * faktor(juz)) untuk semua juz di 'juz_sudah_dihafal'
+      + (ayat_sudah_dihafal * faktor(juz_sedang_disetor))
+    """
+    total = 0.0
+
+    # Juz yang sudah selesai
+    juz_selesai = row.get("juz_sudah_dihafal") or []
+    if isinstance(juz_selesai, str):
+        try:
+            juz_selesai = [int(x.strip()) for x in juz_selesai.split(",") if x.strip()]
+        except Exception:
+            juz_selesai = []
+
+    for j in juz_selesai:
+        try:
+            j = int(j)
+        except Exception:
+            continue
+        tingkat, jumlah_ayat = juz_bobot.get(j, ("Mudah", 0))
+        f = faktor_juz(j)
+        total += jumlah_ayat * f
+
+    # Ayat di juz yang sedang berjalan
+    ayat_sudah = float(row.get("ayat_sudah_dihafal") or 0)
+    juz_sedang = row.get("juz_sedang_disetor")
+    if juz_sedang:
+        f_sedang = faktor_juz(juz_sedang)
+        total += ayat_sudah * f_sedang
+
+    return total
+
+
+def hitung_bobot_setoran(row) -> float:
+    """bobot_ayat_disetor = ayat_sedang_disetor * faktor(juz_sedang_disetor)."""
+    ayat_hari_ini = float(row.get("ayat_sedang_disetor") or 0)
+    juz_sedang = row.get("juz_sedang_disetor")
+    if not juz_sedang:
+        return 0.0
+    f = faktor_juz(juz_sedang)
+    return ayat_hari_ini * f
+
+
+def ambil_data_harian(bulan: str, tahun: str) -> pd.DataFrame:
+    """
+    Ambil data harian untuk bulan & tahun tertentu dari koleksi hafalan_harian_santri.
+    Asumsi di Firestore sudah ada field 'bulan' & 'tahun' (string),
+    misal bulan = 'Mei', tahun = '2025'.
+    """
+    docs = (
+        db.collection(KOLEKSI_HARIAN)
+        .where("bulan", "==", bulan)
+        .where("tahun", "==", tahun)
+        .stream()
+    )
+    data = [d.to_dict() for d in docs]
+    return pd.DataFrame(data) if data else pd.DataFrame()
+
+
 # Fungsi bantu
 def ambil_daftar_santri():
     return sorted([doc.to_dict()['nama'] for doc in db.collection("santri_master").stream()])
+
+# === Koleksi baru untuk data harian ===
+KOLEKSI_HARIAN = "hafalan_harian_santri"  # ganti kalau mau nama lain
+
+def simpan_data_harian_ke_firestore(data):
+    """Simpan satu record harian ke koleksi baru."""
+    db.collection(KOLEKSI_HARIAN).add(data)
+
+def ambil_data_harian_berdasarkan_tanggal(tanggal_str: str):
+    """
+    Ambil semua data harian untuk satu tanggal (format 'YYYY-MM-DD').
+    Dikembalikan list of dict + doc_id.
+    """
+    docs = db.collection(KOLEKSI_HARIAN).where("tanggal_str", "==", tanggal_str).stream()
+    hasil = []
+    for d in docs:
+        row = d.to_dict()
+        row["doc_id"] = d.id
+        hasil.append(row)
+    return hasil
+
+def hapus_data_harian_dari_firestore(doc_id: str):
+    db.collection(KOLEKSI_HARIAN).document(doc_id).delete()
+
 
 def simpan_data_ke_firestore(data):
     doc_id = f"{data['nama']}_{data['bulan']}_{data['tahun']}"
@@ -73,7 +179,14 @@ def ambil_data_dari_nama(nama):
 
 # UI
 # st.title("📘 Analisis Hafalan Santri")
-page = st.sidebar.selectbox("Pilih Halaman", ["Home","Input Data", "Hasil Analisa", "Riwayat Santri", "Manajemen Santri"])
+
+# page = st.sidebar.selectbox("Pilih Halaman", ["Home","Input Data", "Hasil Analisa", "Riwayat Santri", "Manajemen Santri"])
+
+page = st.sidebar.selectbox(
+    "Pilih Halaman",
+    ["Home", "Input Data", "Hasil Analisa", "Manajemen Santri"]
+)
+
 
 bulan_list = ["Januari", "Februari", "Maret", "April", "Mei", "Juni",
               "Juli", "Agustus", "September", "Oktober", "November", "Desember"]
@@ -105,263 +218,431 @@ if page == "Home":
 
     st.info("Silakan pilih halaman di sidebar untuk memulai.")
 
-
-# --- INPUT DATA ---
 elif page == "Input Data":
-    st.subheader("✍️ Input Data Hafalan Santri")
+    st.subheader("✍️ Input Data Harian Hafalan Santri")
 
-    bulan = st.selectbox("Bulan", bulan_list, index=today.month - 1)
-    tahun = st.selectbox("Tahun", tahun_list, index=tahun_list.index(default_tahun))
-    nama = st.selectbox("Pilih Nama Santri", ambil_daftar_santri())
-    juz = st.multiselect("Pilih Juz yang sudah disetor", list(juz_bobot.keys()))
-    juz_sedang = st.selectbox("Pilih Juz yang sedang disetor", list(juz_bobot.keys()))
-    ayat_disetor = st.number_input("Jumlah Ayat yang Sudah Disetor", min_value=0)
-    ayat_sedang_disetor = st.number_input("Jumlah Ayat yang Sedang Disetor", min_value=0)
-    kehadiran = st.number_input("Jumlah Kehadiran Bulan Ini (0–15)", min_value=0, max_value=15)
+    # --------- PILIH TANGGAL (DIPAKAI FORM + LIST DI BAWAH) ---------
+    today = datetime.today().date()
+    tanggal = st.date_input("Tanggal setoran", value=today)
+    tanggal_str = tanggal.strftime("%Y-%m-%d")
 
-    st.markdown("**Nilai Kelancaran (0–100):**")
-    kelancaran_setoran = st.slider("Kelancaran Setoran", 0, 100)
-    kelancaran_murojaah = st.slider("Kelancaran Murojaah", 0, 100)
-    kelancaran_tadarus = st.slider("Kelancaran Tadarus", 0, 100)
+    hari_idx = tanggal.weekday()
+    hari_map = {
+        0: "Senin",
+        1: "Selasa",
+        2: "Rabu",
+        3: "Kamis",
+        4: "Jumat",
+        5: "Sabtu",
+        6: "Ahad",
+    }
+    hari = hari_map.get(hari_idx, "-")
+    bulan = bulan_list[tanggal.month - 1]
+    tahun = str(tanggal.year)
 
-    if st.button("Simpan Data"):
-        total_ayat = sum(juz_bobot[j][1] * (2 if juz_bobot[j][0] == "Sulit" else 1.5 if juz_bobot[j][0] == "Sedang" else 1) for j in juz)
-        kelancaran_total = round((kelancaran_setoran + kelancaran_murojaah + kelancaran_tadarus) / 3, 2)
-        data = {
-            "nama": nama,
-            "juz": juz,
-            "juz_sedang": juz_sedang,
-            "jumlah_hafalan": total_ayat,
-            "ayat_disetor": ayat_disetor,
-            "ayat_sedang_disetor": ayat_sedang_disetor,
-            "kehadiran": kehadiran,
-            "kelancaran_setoran": kelancaran_setoran,
-            "kelancaran_murojaah": kelancaran_murojaah,
-            "kelancaran_tadarus": kelancaran_tadarus,
-            "kelancaran_total": kelancaran_total,
-            "bulan": bulan,
-            "tahun": tahun
-        }
-        simpan_data_ke_firestore(data)
-        st.success("✅ Data berhasil disimpan.")
+    st.write(f"Hari: **{hari}**")
+    if hari not in ["Senin", "Rabu", "Jumat"]:
+        st.info(
+            "⚠️ Tanggal ini bukan Senin/Rabu/Jumat. "
+            "Tetap boleh diinput, tapi pastikan ini memang hari setoran."
+        )
 
-    # Data preview
-    df = pd.DataFrame(ambil_data_dari_firestore(bulan, tahun))
-    st.subheader("📄 Data Hafalan Santri")
-    if not df.empty:
-        for i, row in df.iterrows():
-            doc_id = f"{row['nama']}_{row['bulan']}_{row['tahun']}"
-            with st.expander(f"{row['nama']} | Juz: {row.get('juz', [])}"):
-                st.write(row)
+    # --------- FORM INPUT (AUTO RESET SETELAH SUBMIT) ---------
+    with st.form("form_input_harian", clear_on_submit=True):
+        nama = st.selectbox("Pilih Nama Santri", ambil_daftar_santri())
+
+        st.markdown("### Kehadiran")
+        kehadiran_label = st.radio(
+            "Status kehadiran",
+            options=["Hadir", "Tidak hadir"],
+            horizontal=True,
+            index=0,
+        )
+        kehadiran = 1 if kehadiran_label == "Hadir" else 0
+
+        st.markdown("### Hafalan")
+        col1, col2 = st.columns(2)
+
+        with col1:
+            juz_sudah_dihafal = st.multiselect(
+                "Juz sudah dihafal (tuntas)",
+                options=list(juz_bobot.keys()),
+                help="Pilih semua juz yang sudah selesai dihafal.",
+            )
+
+        with col2:
+            juz_sedang_disetor = st.selectbox(
+                "Juz yang sedang disetor",
+                options=list(juz_bobot.keys()),
+                help="Juz yang saat ini sedang berjalan/setoran.",
+            )
+
+        col3, col4 = st.columns(2)
+        with col3:
+            ayat_sudah_dihafal = st.number_input(
+                "Jumlah ayat yang sudah dihafal di juz yang sedang",
+                min_value=0,
+                step=1,
+                help="Total ayat yang sudah dihafal di juz yang sedang (kumulatif).",
+            )
+        with col4:
+            ayat_sedang_disetor = st.number_input(
+                "Jumlah ayat disetor hari ini",
+                min_value=0,
+                step=1,
+                help="Berapa ayat yang disetor pada hari ini.",
+            )
+
+        st.markdown("### Kelancaran (0–10)")
+        col5, col6, col7 = st.columns(3)
+        with col5:
+            kelancaran_setoran = st.slider(
+                "Kelancaran setoran",
+                min_value=0,
+                max_value=10,
+                value=0,
+                step=1,
+            )
+        with col6:
+            kelancaran_murojaah = st.slider(
+                "Kelancaran murojaah",
+                min_value=0,
+                max_value=10,
+                value=0,
+                step=1,
+            )
+        with col7:
+            kelancaran_tadarus = st.slider(
+                "Kelancaran tadarus",
+                min_value=0,
+                max_value=10,
+                value=0,
+                step=1,
+            )
+
+        if kehadiran == 0:
+            st.caption(
+                "Santri **tidak hadir** → nilai **ayat disetor hari ini** dan semua **kelancaran** "
+                "akan disimpan 0. Hafalan kumulatif tetap disimpan sesuai input."
+            )
+
+        submitted = st.form_submit_button("💾 Simpan Data Harian")
+
+    # --------- PROSES SIMPAN ---------
+    if submitted:
+        errors = []
+        if not nama:
+            errors.append("Nama santri belum dipilih.")
+        if ayat_sudah_dihafal < 0:
+            errors.append("Jumlah ayat sudah dihafal tidak boleh negatif.")
+        if ayat_sedang_disetor < 0:
+            errors.append("Jumlah ayat disetor hari ini tidak boleh negatif.")
+
+        if errors:
+            for e in errors:
+                st.error(e)
+        else:
+            # Kalau tidak hadir, set nilai harian ke 0 (selain hafalan kumulatif)
+            if kehadiran == 0:
+                ayat_sedang_disetor_to_save = 0
+                kelancaran_setoran_to_save = 0.0
+                kelancaran_murojaah_to_save = 0.0
+                kelancaran_tadarus_to_save = 0.0
+            else:
+                ayat_sedang_disetor_to_save = int(ayat_sedang_disetor)
+                kelancaran_setoran_to_save = float(kelancaran_setoran)
+                kelancaran_murojaah_to_save = float(kelancaran_murojaah)
+                kelancaran_tadarus_to_save = float(kelancaran_tadarus)
+
+            data = {
+                "nama": nama,
+                "tanggal": datetime(tanggal.year, tanggal.month, tanggal.day),
+                "tanggal_str": tanggal_str,
+                "hari": hari,
+                "bulan": bulan,
+                "tahun": tahun,
+                "kehadiran": kehadiran,  # 1/0
+
+                "juz_sudah_dihafal": juz_sudah_dihafal,
+                "juz_sedang_disetor": int(juz_sedang_disetor),
+                "ayat_sudah_dihafal": int(ayat_sudah_dihafal),
+                "ayat_sedang_disetor": ayat_sedang_disetor_to_save,
+
+                "kelancaran_setoran": kelancaran_setoran_to_save,
+                "kelancaran_murojaah": kelancaran_murojaah_to_save,
+                "kelancaran_tadarus": kelancaran_tadarus_to_save,
+
+                "created_at": datetime.utcnow(),
+            }
+
+            try:
+                simpan_data_harian_ke_firestore(data)
+                st.success("✅ Data harian berhasil disimpan.")
+            except Exception as e:
+                st.error(f"❌ Gagal menyimpan data: {e}")
+
+    # --------- LIST DATA UNTUK TANGGAL YANG DIPILIH ---------
+    st.markdown("---")
+    st.subheader(f"📄 Data setoran pada tanggal {tanggal_str}")
+
+    hasil_harian = ambil_data_harian_berdasarkan_tanggal(tanggal_str)
+    if hasil_harian:
+        df_harian = pd.DataFrame(hasil_harian)
+        df_harian = df_harian.sort_values("nama")
+
+        for i, row in df_harian.iterrows():
+            with st.expander(f"{row['nama']} | Kehadiran: {'Hadir' if row['kehadiran'] == 1 else 'Tidak hadir'}"):
+                st.write({
+                    "hari": row.get("hari"),
+                    "bulan": row.get("bulan"),
+                    "tahun": row.get("tahun"),
+                    "juz_sudah_dihafal": row.get("juz_sudah_dihafal"),
+                    "juz_sedang_disetor": row.get("juz_sedang_disetor"),
+                    "ayat_sudah_dihafal": row.get("ayat_sudah_dihafal"),
+                    "ayat_sedang_disetor": row.get("ayat_sedang_disetor"),
+                    "kelancaran_setoran": row.get("kelancaran_setoran"),
+                    "kelancaran_murojaah": row.get("kelancaran_murojaah"),
+                    "kelancaran_tadarus": row.get("kelancaran_tadarus"),
+                })
+
                 col1, col2 = st.columns([3, 1])
                 with col1:
-                    konfirmasi = st.checkbox(f"✔️ Yakin ingin hapus data {row['nama']}?", key=f"confirm_{i}")
+                    konfirmasi = st.checkbox(
+                        f"✔️ Yakin ingin hapus data {row['nama']} tanggal {row['tanggal_str']}?",
+                        key=f"confirm_harian_{i}"
+                    )
                 with col2:
-                    if konfirmasi and st.button("❌ Hapus", key=f"hapus_{i}"):
-                        hapus_data_dari_firestore(doc_id)
-                        st.success(f"Data {row['nama']} berhasil dihapus.")
+                    if konfirmasi and st.button("❌ Hapus", key=f"hapus_harian_{i}"):
+                        hapus_data_harian_dari_firestore(row["doc_id"])
+                        st.success(f"Data {row['nama']} tanggal {row['tanggal_str']} berhasil dihapus.")
                         st.rerun()
     else:
-        st.info("Belum ada data untuk periode ini.")
+        st.info("Belum ada data setoran untuk tanggal ini.")
+
 
 # --- ANALISA ---
 elif page == "Hasil Analisa":
-    st.subheader("🔍 Hasil Klustering berdasarkan Data")
-    bulan = st.selectbox("Bulan", bulan_list, index=today.month - 1)
-    tahun = st.selectbox("Tahun", tahun_list, index=tahun_list.index(default_tahun))
+    st.title("Analisis Pola Hafalan Al-Qur'an - K-Means (Per Santri)")
 
-    if st.button("Lihat Klustering"):
-        df = pd.DataFrame(ambil_data_dari_firestore(bulan, tahun))
-        if len(df) >= 2:
-            df['jumlah_hafalan_ayat_berbobot'] = df['jumlah_hafalan']
-            features = df[['jumlah_hafalan_ayat_berbobot', 'kelancaran_total', 'kehadiran']]
-            features_scaled = StandardScaler().fit_transform(features)
-            df['Klaster'] = KMeans(n_clusters=3, random_state=42, n_init='auto').fit_predict(features_scaled)
+    col1, col2, col3 = st.columns([1.2, 1.2, 2])
 
-            order = df.groupby('Klaster')['jumlah_hafalan_ayat_berbobot'].mean().sort_values(ascending=False).index
-            mapping = {
-                order[0]: 'Cepat & Konsisten',
-                order[1]: 'Cukup Baik',
-                order[2]: 'Perlu Pendampingan'
-            }
-            df['Kategori'] = df['Klaster'].map(mapping)
-            df['juz'] = df['juz'].apply(lambda x: ', '.join(map(str, x)) if isinstance(x, list) else str(x))
+    with col1:
+        bulan = st.selectbox("Bulan", bulan_list, index=today.month - 1)
+    with col2:
+        tahun = st.selectbox("Tahun", tahun_list, index=tahun_list.index(default_tahun))
+    with col3:
+        k_default = 3
+        k = st.number_input("Jumlah Cluster (K)", min_value=2, max_value=8, value=k_default, step=1)
 
-            df_rename = df.rename(columns={"jumlah_hafalan": "jumlah_hafalan_ayat"})
-            st.dataframe(df_rename[['nama', 'jumlah_hafalan_ayat', 'kehadiran', 'kelancaran_total', 'Kategori']])
+    st.markdown("---")
 
-            st.plotly_chart(px.pie(df, names='Kategori', title='Distribusi Klaster'))
-            
-            fig, ax = plt.subplots()
-            sns.scatterplot(data=df, x='jumlah_hafalan_ayat_berbobot', y='kelancaran_total', hue='Kategori', palette='Set2', s=100)
-            st.pyplot(fig)
+    if st.button("🔍 PROSES ANALISIS"):
+        # 1. Kumpulkan data
+        st.subheader("1. Kumpulkan Data")
+        df_raw = ambil_data_harian(bulan, tahun)
 
-            # Hitung jumlah per kategori
-            jumlah_per_kategori = df['Kategori'].value_counts().to_dict()
+        if df_raw.empty:
+            st.warning("Data harian untuk periode ini belum tersedia.")
+            st.stop()
 
-            # Tampilkan keterangan informatif
-            st.markdown(f"""
-            **📊 Ringkasan Klasterisasi Santri:**
+        st.write(f"Jumlah data mentah: **{len(df_raw)}** baris")
+        with st.expander("Lihat data mentah"):
+            st.dataframe(df_raw)
 
-            - **{jumlah_per_kategori.get('Cepat & Konsisten', 0)} santri** berada dalam kategori **Cepat & Konsisten**: menunjukkan hafalan tinggi, kehadiran baik, dan kelancaran stabil.
-            - **{jumlah_per_kategori.get('Cukup Baik', 0)} santri** berada dalam kategori **Cukup Baik**: memiliki capaian yang cukup namun masih bisa ditingkatkan.
-            - **{jumlah_per_kategori.get('Perlu Pendampingan', 0)} santri** berada dalam kategori **Perlu Pendampingan**: menunjukkan tantangan dalam hafalan, kehadiran, atau kelancaran yang perlu dibina lebih lanjut.
+        # 2. Tentukan atribut
+        st.subheader("2. Tentukan Atribut yang Digunakan")
+        st.markdown(
+            "- **bobot_ayat_dihafal**  (total hafalan berbobot)\n"
+            "- **bobot_ayat_disetor**  (setoran berbobot)\n"
+            "- **kelancaran_setoran**  (0–10)\n"
+            "- **kelancaran_murojaah** (0–10)\n"
+            "- **kelancaran_tadarus**  (0–10)\n"
+            "- **kehadiran**           (0 = tidak hadir, 1 = hadir; akan dirata-ratakan per santri)"
+        )
 
-            📌 _Grafik ini membantu pengelola melihat distribusi santri berdasarkan performa mereka secara objektif menggunakan algoritma K-Means._
+        # 3. Screening data
+        st.subheader("3. Screening Data")
+        df = df_raw.copy()
 
-            **💡 Kesimpulan Sementara:**  
-            Sebagian besar santri menunjukkan hasil yang cukup baik hingga sangat baik, namun tetap terdapat sebagian yang memerlukan bimbingan lebih intensif untuk mencapai hasil maksimal.
-            """)
+        required_cols = [
+            "nama", "juz_sudah_dihafal", "juz_sedang_disetor", "ayat_sudah_dihafal",
+            "ayat_sedang_disetor", "kelancaran_setoran", "kelancaran_murojaah",
+            "kelancaran_tadarus", "kehadiran"
+        ]
+        missing = [c for c in required_cols if c not in df.columns]
+        if missing:
+            st.error(f"Kolom berikut belum ada di koleksi Firestore: {missing}")
+            st.stop()
 
-            st.divider()
-            st.subheader("🧪 Evaluasi Kualitas Klaster (Langkah Perhitungan)")
+        # Cast numerik
+        for col in ["kelancaran_setoran", "kelancaran_murojaah", "kelancaran_tadarus"]:
+            df[col] = pd.to_numeric(df[col], errors="coerce")
 
-            # 0) Salin data yang dipakai untuk evaluasi (tidak mengubah df di atas)
-            df_eval = df[['jumlah_hafalan_ayat_berbobot', 'kelancaran_total', 'kehadiran']].copy()
+        # Nilai kelancaran di luar 0–10 dianggap anomali -> NaN
+        for col in ["kelancaran_setoran", "kelancaran_murojaah", "kelancaran_tadarus"]:
+            df.loc[(df[col] < 0) | (df[col] > 10), col] = None
 
-            # Opsional: pembobotan lembut (matikan kalau tidak perlu)
-            # df_eval['jumlah_hafalan_ayat_berbobot'] *= 0.9
-            # df_eval['kelancaran_total']            *= 1.5
-            # df_eval['kehadiran']                   *= 0.75
+        df["juz_sedang_disetor"] = pd.to_numeric(df["juz_sedang_disetor"], errors="coerce")
+        df["ayat_sudah_dihafal"] = pd.to_numeric(df["ayat_sudah_dihafal"], errors="coerce")
+        df["ayat_sedang_disetor"] = pd.to_numeric(df["ayat_sedang_disetor"], errors="coerce")
 
-            # 1) Winsorize (pemotongan nilai ekstrem)
-            from scipy.stats.mstats import winsorize
-            LIMIT_LOW, LIMIT_HIGH = 0.15, 0.15  # kamu sudah pakai 15% — sesuai hasil terbaikmu
-            df_w = df_eval.copy()
-            for col in df_w.columns:
-                df_w[col] = winsorize(df_w[col], limits=[LIMIT_LOW, LIMIT_HIGH])
+        # Kehadiran: 1 = hadir, 0 = tidak hadir
+        df["kehadiran"] = df["kehadiran"].fillna(0)
+        df["kehadiran"] = df["kehadiran"].apply(
+            lambda x: 1 if str(x).lower() in ["1", "true", "hadir", "ya"] else 0
+        )
 
-            # 2) Standardisasi (mean=0, std=1)
-            from sklearn.preprocessing import StandardScaler
-            scaler = StandardScaler()
-            X_scaled = scaler.fit_transform(df_w)
+        before_screen = len(df)
+        # Buang baris yang benar-benar rusak (juz_sedang / ayat utama kosong)
+        df = df.dropna(
+            subset=["juz_sedang_disetor", "ayat_sudah_dihafal", "ayat_sedang_disetor"],
+            how="any"
+        )
+        after_screen = len(df)
+        st.write(f"Data setelah screening: **{after_screen}** baris (dari {before_screen}).")
 
-            # 3) PCA ke 2 dimensi (untuk memudahkan klasterisasi & visual evaluasi)
-            from sklearn.decomposition import PCA
-            pca = PCA(n_components=2, random_state=42)
-            X_pca = pca.fit_transform(X_scaled)
-            expl = pca.explained_variance_ratio_
+        if after_screen < 2:
+            st.error("Data setelah screening terlalu sedikit untuk analisis.")
+            st.stop()
 
-            # 4) KMeans (tidak mengubah df['Klaster'] utama)
-            from sklearn.cluster import KMeans
-            kmeans_eval = KMeans(
-                n_clusters=3,
-                init='k-means++',
-                random_state=42,
-                n_init=50
-            )
-            labels_eval = kmeans_eval.fit_predict(X_pca)
+        # 4. Transformasi data: pembobotan (harian) + agregasi per santri + normalisasi
+        st.subheader("4. Transformasi Data (Pembobotan, Agregasi Per Santri & Normalisasi)")
 
-            # 5) Skor Silhouette
-            from sklearn.metrics import silhouette_score
-            sil_score = silhouette_score(X_pca, labels_eval)
+        # Pembobotan per baris harian
+        df["bobot_ayat_dihafal"] = df.apply(hitung_bobot_hafalan, axis=1)
+        df["bobot_ayat_disetor"] = df.apply(hitung_bobot_setoran, axis=1)
 
-            # Tampilan ringkas (low profile)
-            st.caption(f"Winsorize limits: low={LIMIT_LOW:.2f}, high={LIMIT_HIGH:.2f}")
-            st.caption(f"PCA explained variance: PC1={expl[0]:.2f}, PC2={expl[1]:.2f} (total {(expl[0]+expl[1]):.2f})")
-            st.text(f"Silhouette Score (eval): {sil_score:.3f}")
+        fitur = [
+            "bobot_ayat_dihafal",
+            "bobot_ayat_disetor",
+            "kelancaran_setoran",
+            "kelancaran_murojaah",
+            "kelancaran_tadarus",
+            "kehadiran",
+        ]
 
-            # === Detail langkah perhitungan (expandable) ===
-            with st.expander("Lihat detail langkah perhitungan (data → winsorize → scaling → PCA → KMeans → Silhouette)"):
-                import numpy as np
-                st.markdown("**1) Data awal untuk evaluasi** (3 fitur):")
-                st.dataframe(df_eval.head())
+        st.write("Contoh data harian setelah pembobotan (sebelum agregasi):")
+        st.dataframe(df[["nama"] + fitur].head())
 
-                st.markdown("**2) Ringkasan statistik sebelum & sesudah winsorize**")
-                def summary(df_):
-                    return df_.agg(['count','min','mean','std','median','max']).T
-                col1, col2 = st.columns(2)
-                with col1:
-                    st.caption("Sebelum winsorize")
-                    st.dataframe(summary(df_eval))
-                with col2:
-                    st.caption("Sesudah winsorize (15% low & high)")
-                    st.dataframe(summary(df_w))
+        # 🔴 DI SINI: agregasi per santri
+        df_agg = df.groupby("nama").agg({
+            "bobot_ayat_dihafal": "mean",
+            "bobot_ayat_disetor": "mean",
+            "kelancaran_setoran": "mean",
+            "kelancaran_murojaah": "mean",
+            "kelancaran_tadarus": "mean",
+            "kehadiran": "mean",
+        }).reset_index()
 
-                st.markdown("**3) Parameter standardisasi (mean & std per fitur)**")
-                means = dict(zip(df_w.columns, scaler.mean_))
-                stds  = dict(zip(df_w.columns, scaler.scale_))
-                st.json({"mean": {k: float(v) for k,v in means.items()},
-                        "std":  {k: float(v) for k,v in stds.items()}})
+        st.write("Ringkasan fitur per santri (rata-rata selama bulan tersebut):")
+        st.dataframe(df_agg[["nama"] + fitur])
 
-                st.markdown("**4) PCA (2 komponen)**")
-                st.write(f"Explained variance ratio: {expl[0]:.4f}, {expl[1]:.4f} (total {(expl[0]+expl[1]):.4f})")
-                st.write("Komponen PCA (arah kombinasi fitur):")
-                comp = np.round(pca.components_, 4)
-                st.dataframe(
-                    pd.DataFrame(comp, index=['PC1','PC2'], columns=df_w.columns)
-                )
+        if len(df_agg) < int(k):
+            st.error(f"Jumlah santri ({len(df_agg)}) lebih kecil dari K={int(k)}. Turunkan nilai K atau kumpulkan lebih banyak data.")
+            st.stop()
 
-                st.markdown("**5) Parameter KMeans (evaluasi)**")
-                st.json({
-                    "n_clusters": int(kmeans_eval.n_clusters),
-                    "init": "k-means++",
-                    "n_init": int(kmeans_eval.n_init),
-                    "random_state": 42
-                })
+        df_fitur = df_agg[fitur].astype(float).copy()
 
-                st.markdown("**6) Hasil akhir evaluasi**")
-                st.write(f"Silhouette Score: **{sil_score:.3f}**")
-            # 
-            st.divider()
-            st.subheader("📊 Hasil Klasterisasi Setelah Pra-pemrosesan Data")
+        scaler = StandardScaler()
+        X_scaled = scaler.fit_transform(df_fitur)
 
-            # Gunakan data evaluasi yang sudah melalui proses winsorize + scaling + PCA
-            # df_w dan X_pca berasal dari blok evaluasi di atas, jadi langsung kita pakai di sini
+        # 5. Implementasi metode K-Means
+        st.subheader("5. Implementasi Metode (K-Means)")
 
-            # Jalankan kembali KMeans pada data PCA yang sama (agar konsisten dengan evaluasi)
-            kmeans_final = KMeans(
-                n_clusters=3,
-                init='k-means++',
-                random_state=42,
-                n_init=50
-            )
-            labels_final = kmeans_final.fit_predict(X_pca)
+        kmeans = KMeans(n_clusters=int(k), init="k-means++", n_init=20, random_state=42)
+        labels = kmeans.fit_predict(X_scaled)
+        df_agg["cluster"] = labels
 
-            # Tambahkan kolom hasil klaster baru ke df_w (bukan ke df utama agar tidak tumpang tindih)
-            df_w['Klaster (Evaluasi)'] = labels_final
+        st.success(f"Algoritma K-Means berhasil dijalankan dengan K = {int(k)}.")
+        st.write("Centroid (di ruang fitur terstandarisasi):")
+        centroids_df = pd.DataFrame(kmeans.cluster_centers_, columns=fitur)
+        st.dataframe(centroids_df)
 
-            # Tentukan urutan klaster berdasarkan rata-rata hafalan
-            order_eval = df_w.groupby('Klaster (Evaluasi)')['jumlah_hafalan_ayat_berbobot'].mean().sort_values(ascending=False).index
-            mapping_eval = {
-                order_eval[0]: 'Cepat & Konsisten (baru)',
-                order_eval[1]: 'Cukup Baik (baru)',
-                order_eval[2]: 'Perlu Pendampingan (baru)'
-            }
-            df_w['Kategori (Evaluasi)'] = df_w['Klaster (Evaluasi)'].map(mapping_eval)
+        # 6. Uji metode: Elbow & Silhouette
+        st.subheader("6. Uji Metode (Elbow & Silhouette)")
 
-            # Tampilkan tabel perbandingan hasil klasterisasi baru
-            st.markdown("### 🔄 Perbandingan hasil klasterisasi setelah pra-pemrosesan:")
-            st.dataframe(df_w[['jumlah_hafalan_ayat_berbobot', 'kelancaran_total', 'kehadiran', 'Kategori (Evaluasi)']])
+        max_k = min(8, len(df_agg) - 1)  # batas aman
+        sse = []
+        sil_scores = []
+        k_range = range(2, max_k + 1)
+        for kk in k_range:
+            km = KMeans(n_clusters=kk, init="k-means++", n_init=10, random_state=42)
+            lbl = km.fit_predict(X_scaled)
+            sse.append(km.inertia_)
+            try:
+                sil = silhouette_score(X_scaled, lbl)
+            except Exception:
+                sil = None
+            sil_scores.append(sil)
 
-            # Visualisasi pie chart hasil baru
-            st.plotly_chart(px.pie(df_w, names='Kategori (Evaluasi)', title='Distribusi Klaster (Setelah Pra-pemrosesan)'))
+        elbow_df = pd.DataFrame({"K": list(k_range), "SSE": sse, "Silhouette": sil_scores})
 
-            # Scatter plot hasil baru (pakai PCA)
-            fig2, ax2 = plt.subplots()
-            sns.scatterplot(
-                x=X_pca[:, 0], y=X_pca[:, 1],
-                hue=df_w['Kategori (Evaluasi)'],
-                palette='Set2', s=100
-            )
-            plt.xlabel("PC1")
-            plt.ylabel("PC2")
-            st.pyplot(fig2)
+        c1, c2 = st.columns(2)
+        with c1:
+            st.write("Grafik Elbow (SSE vs K):")
+            fig_elbow = px.line(elbow_df, x="K", y="SSE", markers=True)
+            st.plotly_chart(fig_elbow, use_container_width=True)
+        with c2:
+            st.write("Nilai Silhouette per K:")
+            st.dataframe(elbow_df)
 
-            # Ringkasan hasil baru
-            jumlah_per_kategori_eval = df_w['Kategori (Evaluasi)'].value_counts().to_dict()
-            st.markdown(f"""
-            **📈 Ringkasan Klasterisasi Setelah Pra-pemrosesan**  
+        # 7. Uji validitas & reliabilitas (sederhana)
+        st.subheader("7. Uji Validitas dan Reliabilitas (Sederhana)")
 
-            - **{jumlah_per_kategori_eval.get('Cepat & Konsisten (baru)', 0)} santri** berada dalam kategori **Cepat & Konsisten (baru)**.  
-            - **{jumlah_per_kategori_eval.get('Cukup Baik (baru)', 0)} santri** berada dalam kategori **Cukup Baik (baru)**.  
-            - **{jumlah_per_kategori_eval.get('Perlu Pendampingan (baru)', 0)} santri** berada dalam kategori **Perlu Pendampingan (baru)**.  
+        cluster_summary = df_agg.groupby("cluster")[fitur].mean().reset_index()
+        st.write("Rata-rata setiap fitur per cluster (level santri):")
+        st.dataframe(cluster_summary)
 
-            📌 _Distribusi ini berasal dari data yang sudah distandarisasi, dipangkas nilai ekstrem, dan direduksi dimensinya dengan PCA, sehingga menghasilkan pola klaster yang lebih stabil dan objektif._
-            """)                
+        try:
+            sil_current = silhouette_score(X_scaled, labels)
+            st.write(f"Silhouette score untuk K={int(k)}: **{sil_current:.3f}**")
+        except Exception:
+            st.write("Silhouette score untuk K saat ini tidak dapat dihitung.")
+
+        st.markdown(
+            "- **Validitas**: dicek secara kualitatif dari pola rata-rata tiap cluster (apakah sesuai dengan kategori hafalan).\n"
+            "- **Reliabilitas sederhana**: model memakai inisialisasi `k-means++` dengan beberapa iterasi (n_init). "
+            "Bisa diuji lagi dengan membandingkan bulan berbeda."
+        )
+
+        # 8. Hasil & kesimpulan
+        st.subheader("8. Hasil dan Kesimpulan")
+
+        # Penamaan kategori berdasarkan rata-rata bobot_ayat_dihafal
+        order = cluster_summary.sort_values("bobot_ayat_dihafal", ascending=False)["cluster"].tolist()
+        kategori_map = {}
+        if len(order) >= 3:
+            kategori_map[order[0]] = "Hafalan Tinggi & Stabil"
+            kategori_map[order[1]] = "Hafalan Sedang"
+            kategori_map[order[2]] = "Perlu Pendampingan"
+            for idx, c in enumerate(order[3:], start=3):
+                kategori_map[c] = f"Cluster {idx+1}"
         else:
-            st.warning("❗ Tambahkan minimal 2 data untuk analisa.")
-        
+            for idx, c in enumerate(order):
+                kategori_map[c] = f"Cluster {idx+1}"
+
+        df_agg["Kategori"] = df_agg["cluster"].map(kategori_map)
+
+        st.write("Tabel hasil clustering per santri:")
+        st.dataframe(df_agg[["nama", "Kategori"] + fitur])
+
+        # Visualisasi 2D: bobot_ayat_dihafal vs bobot_ayat_disetor
+        fig_scatter = px.scatter(
+            df_agg,
+            x="bobot_ayat_dihafal",
+            y="bobot_ayat_disetor",
+            color="Kategori",
+            hover_data=["nama", "kelancaran_setoran", "kelancaran_murojaah", "kelancaran_tadarus", "kehadiran"],
+            title="Sebaran Santri Berdasarkan Bobot Hafalan & Setoran (Per Santri)"
+        )
+        st.plotly_chart(fig_scatter, use_container_width=True)
+
+        st.success("Proses analisis selesai. Tabel & grafik di atas sudah dalam level **santri**, siap untuk pembahasan skripsi. ✅")
+
+
+
+
+
 elif page == "Manajemen Santri":
     st.subheader("📋 Manajemen Data Santri")
 
@@ -419,18 +700,3 @@ elif page == "Manajemen Santri":
                 st.rerun()
     else:
         st.info("Belum ada data santri.")
-
-
-# --- RIWAYAT ---
-elif page == "Riwayat Santri":
-    st.subheader("📄 Riwayat Hafalan Santri")
-    nama = st.selectbox("Pilih Nama", ambil_daftar_santri())
-    if st.button("Lihat Riwayat"):
-        hasil = ambil_data_dari_nama(nama)
-        if hasil:
-            df = pd.DataFrame(hasil)
-            df.rename(columns={"jumlah_hafalan": "jumlah_hafalan_ayat"}, inplace=True)
-            df['juz'] = df['juz'].apply(lambda x: ', '.join(map(str, x)) if isinstance(x, list) else x)
-            st.dataframe(df.sort_values(by=["tahun", "bulan"], ascending=False))
-        else:
-            st.warning("Data tidak ditemukan.")
